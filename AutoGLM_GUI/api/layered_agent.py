@@ -220,15 +220,20 @@ async def chat(device_id: str, message: str) -> str:
     acquired = False
 
     try:
+        logger.info(f"[LayeredAgent] Acquiring device {device_id}...")
         acquired = await asyncio.to_thread(
             manager.acquire_device, device_id, timeout=None, auto_initialize=True
         )
+        logger.info(f"[LayeredAgent] Device {device_id} acquired: {acquired}")
+        
+        logger.info(f"[LayeredAgent] Getting agent for device {device_id}...")
         agent = await asyncio.to_thread(
             manager.get_agent_with_context,
             device_id,
             context="layered",
             agent_type="glm-async",
         )
+        logger.info(f"[LayeredAgent] Agent obtained for {device_id}")
 
         # 临时覆盖配置
         original_max_steps = agent.agent_config.max_steps
@@ -240,9 +245,11 @@ async def chat(device_id: str, message: str) -> str:
         try:
             # 重置 agent 确保干净状态
             agent.reset()
+            logger.info(f"[LayeredAgent] Agent reset, starting run for: {message}")
 
             result = await agent.run(message)  # type: ignore[misc]
             steps = agent.step_count
+            logger.info(f"[LayeredAgent] Agent run completed: steps={steps}, result={result[:100] if result else 'None'}...")
 
             # 检查是否达到步数限制
             if steps >= MCP_MAX_STEPS and result == "Max steps reached":
