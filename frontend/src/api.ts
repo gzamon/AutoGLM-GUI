@@ -517,6 +517,17 @@ export async function getScreenshot(
   return res.data;
 }
 
+export async function uploadCanvasScreenshot(
+  deviceId: string,
+  imageBase64: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await axios.post('/api/screenshot/canvas', {
+    device_id: deviceId,
+    image: imageBase64,
+  });
+  return res.data;
+}
+
 export async function sendTap(
   x: number,
   y: number,

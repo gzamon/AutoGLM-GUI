@@ -66,10 +66,14 @@ def capture_screenshot(
         try:
             img = Image.open(BytesIO(data))
             width, height = img.size
+            
+            # Check if this is a black screen (FLAG_SECURE protection)
+            is_sensitive = _is_black_screen(data)
+            
             buffered = BytesIO()
             img.save(buffered, format="PNG")
             base64_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return Screenshot(base64_data=base64_data, width=width, height=height)
+            return Screenshot(base64_data=base64_data, width=width, height=height, is_sensitive=is_sensitive)
         except Exception:
             # Try next attempt
             continue
@@ -121,13 +125,45 @@ def _is_valid_png(data: bytes) -> bool:
     )
 
 
+def _is_black_screen(data: bytes) -> bool:
+    """Check if screenshot is a black screen (FLAG_SECURE protection).
+    
+    Returns True if the image is mostly black, indicating the app
+    has set FLAG_SECURE to prevent screenshots.
+    """
+    try:
+        img = Image.open(BytesIO(data))
+        # Convert to RGB if necessary
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        
+        # Sample pixels to check if mostly black
+        width, height = img.size
+        black_count = 0
+        sample_points = 100  # Sample 100 points
+        
+        import random
+        for _ in range(sample_points):
+            x = random.randint(0, width - 1)
+            y = random.randint(0, height - 1)
+            r, g, b = img.getpixel((x, y))
+            # Consider pixel black if all channels < 10
+            if r < 10 and g < 10 and b < 10:
+                black_count += 1
+        
+        # If more than 95% of sampled pixels are black, it's a black screen
+        return black_count > sample_points * 0.95
+    except Exception:
+        return False
+
+
 def _fallback_screenshot() -> Screenshot:
-    """Return a black fallback image."""
+    """Return a black fallback image (marked as sensitive)."""
     width, height = 1080, 2400
     img = Image.new("RGB", (width, height), color="black")
     buffered = BytesIO()
     img.save(buffered, format="PNG")
     base64_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return Screenshot(
-        base64_data=base64_data, width=width, height=height, is_sensitive=False
+        base64_data=base64_data, width=width, height=height, is_sensitive=True
     )

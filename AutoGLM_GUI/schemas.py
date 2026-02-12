@@ -48,6 +48,12 @@ class ScreenshotRequest(BaseModel):
     device_id: str | None = None
 
 
+class CanvasScreenshotRequest(BaseModel):
+    """Request for uploading canvas screenshot from frontend."""
+    device_id: str
+    image: str  # base64 encoded PNG (data URL or raw base64)
+
+
 class ScreenshotResponse(BaseModel):
     success: bool
     image: str  # base64 encoded PNG

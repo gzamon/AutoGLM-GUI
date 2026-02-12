@@ -14,6 +14,7 @@ import {
   sendTouchDown,
   sendTouchMove,
   sendTouchUp,
+  uploadCanvasScreenshot,
 } from '../api';
 import { detectWebCodecsUnavailabilityReason } from '../lib/webcodecs-utils';
 
@@ -96,6 +97,7 @@ export function ScrcpyPlayer({
   const moveThrottleTimerRef = useRef<number | null>(null);
   const wheelTimeoutRef = useRef<number | null>(null);
   const accumulatedScrollRef = useRef<{ deltaY: number } | null>(null);
+  const canvasUploadTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onFallbackRef.current = onFallback;
@@ -337,6 +339,11 @@ export function ScrcpyPlayer({
         fallbackTimerRef.current = null;
       }
 
+      if (canvasUploadTimerRef.current) {
+        clearInterval(canvasUploadTimerRef.current);
+        canvasUploadTimerRef.current = null;
+      }
+
       setStatus('disconnected');
       setScreenInfo(null);
       setErrorMessage(null);
@@ -408,6 +415,28 @@ export function ScrcpyPlayer({
 
         setStatus('connected');
         onStreamReadyRef.current?.({ close: () => socket.close() });
+        
+        // Start periodic canvas screenshot upload for FLAG_SECURE bypass
+        const uploadCanvasFrame = () => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          
+          try {
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            
+            const dataUrl = canvas.toDataURL('image/png');
+            uploadCanvasScreenshot(deviceId, dataUrl).catch(err => {
+              console.debug('[ScrcpyPlayer] Failed to upload canvas screenshot:', err);
+            });
+          } catch (err) {
+            console.debug('[ScrcpyPlayer] Canvas capture failed:', err);
+          }
+        };
+        
+        // Upload immediately and then every 2 seconds
+        uploadCanvasFrame();
+        canvasUploadTimerRef.current = window.setInterval(uploadCanvasFrame, 2000);
       } catch (error) {
         console.error('[ScrcpyPlayer] Decoder initialization failed:', error);
         setStatus('error');
