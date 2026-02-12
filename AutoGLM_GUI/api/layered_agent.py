@@ -132,10 +132,28 @@ PLANNER_INSTRUCTIONS = """## 核心目标
 **Output**: `chat(id, "点击屏幕右上角的'...'（三个点）菜单按钮。")`
 
 ## 工具集 (Tools)
-1. `list_devices()`
-2. `chat(device_id, message)`: 
+
+### 确定性工具（不使用 AI，速度快）
+1. `open_app(device_id, app_name)`: 直接打开应用，如 "小红书"、"微信"
+2. `scroll(device_id, direction, distance)`: 直接滚动屏幕
+   - direction: "up" 或 "down"
+   - distance: "small"、"medium" 或 "large"
+3. `tap(device_id, x, y)`: 直接点击屏幕坐标
+
+### AI 工具（需要视觉理解）
+4. `chat(device_id, message)`: 
    - 发送操作指令（如"点击红色按钮"）。
    - 发送查询问题（如"那个验证码是多少？"）。
+   - 用于需要视觉理解的复杂操作。
+
+### 工具选择原则
+- **优先使用确定性工具**：打开应用、滚动屏幕等简单操作使用 open_app、scroll、tap
+- **复杂操作使用 chat**：需要识别屏幕内容、点击特定元素时使用 chat
+- **示例**：
+  - 打开小红书 → `open_app(device_id, "小红书")`
+  - 向下滚动 → `scroll(device_id, "down", "medium")`
+  - 点击某个笔记 → `chat(device_id, "点击屏幕中间的笔记")`
+  - 点赞 → `chat(device_id, "点击右下角的爱心按钮点赞")`
 
 """
 
@@ -301,6 +319,173 @@ async def chat(device_id: str, message: str) -> str:
             await asyncio.to_thread(manager.release_device, device_id)
 
 
+# ==================== 预定义动作工具 ====================
+
+
+@function_tool
+async def open_app(device_id: str, app_name: str) -> str:
+    """
+    直接打开指定应用，不使用 AI。
+
+    这是一个确定性的操作，直接通过 ADB 命令启动应用。
+    比使用 chat 工具更快、更可靠。
+
+    Args:
+        device_id: 设备标识符，从 list_devices 获取
+        app_name: 应用名称，如 "小红书"、"微信"、"抖音" 等
+
+    Returns:
+        JSON 格式的执行结果
+    """
+    from AutoGLM_GUI.adb.device import launch_app, APP_PACKAGES
+    
+    logger.info(f"[LayeredAgent] open_app tool called: device_id={device_id}, app_name={app_name}")
+    
+    if app_name not in APP_PACKAGES:
+        available_apps = ", ".join(sorted(APP_PACKAGES.keys()))
+        return json.dumps({
+            "result": f"不支持的应用: {app_name}。支持的应用: {available_apps}",
+            "success": False,
+        }, ensure_ascii=False)
+    
+    try:
+        success = await asyncio.to_thread(launch_app, app_name, device_id)
+        if success:
+            return json.dumps({
+                "result": f"已打开 {app_name}",
+                "success": True,
+            }, ensure_ascii=False)
+        else:
+            return json.dumps({
+                "result": f"打开 {app_name} 失败",
+                "success": False,
+            }, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"[LayeredAgent] open_app error: {e}")
+        return json.dumps({
+            "result": f"打开应用失败: {str(e)}",
+            "success": False,
+        }, ensure_ascii=False)
+
+
+@function_tool
+async def scroll(device_id: str, direction: str = "down", distance: str = "medium") -> str:
+    """
+    直接滚动屏幕，不使用 AI。
+
+    这是一个确定性的操作，直接通过 ADB 命令执行滑动。
+    比使用 chat 工具更快、更可靠。
+
+    Args:
+        device_id: 设备标识符，从 list_devices 获取
+        direction: 滚动方向，可选值: "up"（向上）、"down"（向下），默认 "down"
+        distance: 滚动距离，可选值: "small"（小）、"medium"（中）、"large"（大），默认 "medium"
+
+    Returns:
+        JSON 格式的执行结果
+    """
+    from AutoGLM_GUI.adb.device import swipe
+    from AutoGLM_GUI.config_manager import config_manager
+    
+    logger.info(f"[LayeredAgent] scroll tool called: device_id={device_id}, direction={direction}, distance={distance}")
+    
+    direction = direction.lower()
+    distance = distance.lower()
+    
+    if direction not in ["up", "down"]:
+        return json.dumps({
+            "result": f"无效的滚动方向: {direction}。可选值: up, down",
+            "success": False,
+        }, ensure_ascii=False)
+    
+    if distance not in ["small", "medium", "large"]:
+        return json.dumps({
+            "result": f"无效的滚动距离: {distance}。可选值: small, medium, large",
+            "success": False,
+        }, ensure_ascii=False)
+    
+    try:
+        effective_config = config_manager.get_effective_config()
+        screen_width = effective_config.screen_width or 1080
+        screen_height = effective_config.screen_height or 2400
+        
+        center_x = screen_width // 2
+        
+        distance_map = {
+            "small": int(screen_height * 0.25),
+            "medium": int(screen_height * 0.5),
+            "large": int(screen_height * 0.75),
+        }
+        
+        scroll_distance = distance_map[distance]
+        
+        if direction == "down":
+            start_y = int(screen_height * 0.7)
+            end_y = start_y - scroll_distance
+        else:
+            start_y = int(screen_height * 0.3)
+            end_y = start_y + scroll_distance
+        
+        await asyncio.to_thread(
+            swipe,
+            start_x=center_x,
+            start_y=start_y,
+            end_x=center_x,
+            end_y=end_y,
+            device_id=device_id,
+            duration=300,
+        )
+        
+        direction_text = "向下" if direction == "down" else "向上"
+        distance_text = {"small": "小", "medium": "中", "large": "大"}[distance]
+        
+        return json.dumps({
+            "result": f"已{direction_text}滚动（{distance_text}距离）",
+            "success": True,
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        logger.error(f"[LayeredAgent] scroll error: {e}")
+        return json.dumps({
+            "result": f"滚动失败: {str(e)}",
+            "success": False,
+        }, ensure_ascii=False)
+
+
+@function_tool
+async def tap(device_id: str, x: int, y: int) -> str:
+    """
+    直接点击屏幕指定坐标，不使用 AI。
+
+    这是一个确定性的操作，直接通过 ADB 命令执行点击。
+    比使用 chat 工具更快、更可靠。
+
+    Args:
+        device_id: 设备标识符，从 list_devices 获取
+        x: 点击位置的 X 坐标（像素）
+        y: 点击位置的 Y 坐标（像素）
+
+    Returns:
+        JSON 格式的执行结果
+    """
+    from AutoGLM_GUI.adb.device import tap as adb_tap
+    
+    logger.info(f"[LayeredAgent] tap tool called: device_id={device_id}, x={x}, y={y}")
+    
+    try:
+        await asyncio.to_thread(adb_tap, x, y, device_id=device_id)
+        return json.dumps({
+            "result": f"已点击坐标 ({x}, {y})",
+            "success": True,
+        }, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"[LayeredAgent] tap error: {e}")
+        return json.dumps({
+            "result": f"点击失败: {str(e)}",
+            "success": False,
+        }, ensure_ascii=False)
+
+
 # ==================== Agent 初始化 ====================
 
 
@@ -345,7 +530,7 @@ def _create_planner_agent(client: AsyncOpenAI) -> Agent[Any]:
         name="Planner",
         instructions=PLANNER_INSTRUCTIONS,
         model=model,
-        tools=[list_devices, chat],
+        tools=[list_devices, chat, open_app, scroll, tap],
     )
 
 
