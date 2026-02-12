@@ -5,30 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from AutoGLM_GUI.adb_plus import capture_screenshot
+from AutoGLM_GUI.adb_plus.screenshot import set_canvas_screenshot, _get_canvas_screenshot, clear_canvas_screenshot
 from AutoGLM_GUI.exceptions import DeviceNotAvailableError
 from AutoGLM_GUI.logger import logger
 from AutoGLM_GUI.schemas import ScreenshotRequest, ScreenshotResponse, CanvasScreenshotRequest
 from AutoGLM_GUI.socketio_server import stop_streamers
 
 router = APIRouter()
-
-# Cache for canvas screenshots from frontend (device_id -> base64 data)
-_canvas_screenshots: dict[str, str] = {}
-
-
-def set_canvas_screenshot(device_id: str, base64_data: str) -> None:
-    """Store a canvas screenshot from frontend."""
-    _canvas_screenshots[device_id] = base64_data
-
-
-def get_canvas_screenshot(device_id: str) -> str | None:
-    """Get cached canvas screenshot."""
-    return _canvas_screenshots.get(device_id)
-
-
-def clear_canvas_screenshot(device_id: str) -> None:
-    """Clear cached canvas screenshot."""
-    _canvas_screenshots.pop(device_id, None)
 
 
 @router.post("/api/video/reset")
@@ -104,7 +87,7 @@ def take_screenshot(request: ScreenshotRequest) -> ScreenshotResponse:
         
         # If screen is sensitive (FLAG_SECURE), try to use canvas screenshot
         if screenshot.is_sensitive:
-            canvas_data = get_canvas_screenshot(device_id)
+            canvas_data = _get_canvas_screenshot(device_id)
             if canvas_data:
                 logger.info(f"Using canvas screenshot for sensitive screen on device {device_id}")
                 import base64

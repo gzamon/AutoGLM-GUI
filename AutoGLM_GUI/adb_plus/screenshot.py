@@ -50,6 +50,23 @@ def capture_screenshot(
     Raises:
         DeviceNotAvailableError: When device is not found or offline.
     """
+    # First, check if we have a canvas screenshot cached (for FLAG_SECURE bypass)
+    if device_id:
+        canvas_data = _get_canvas_screenshot(device_id)
+        if canvas_data:
+            try:
+                img_data = base64.b64decode(canvas_data)
+                img = Image.open(BytesIO(img_data))
+                width, height = img.size
+                return Screenshot(
+                    base64_data=canvas_data,
+                    width=width,
+                    height=height,
+                    is_sensitive=False,
+                )
+            except Exception:
+                pass  # Fall through to adb screenshot
+    
     attempts = max(1, retries + 1)
     for _ in range(attempts):
         # _try_capture may raise DeviceNotAvailableError, let it propagate
@@ -70,6 +87,23 @@ def capture_screenshot(
             # Check if this is a black screen (FLAG_SECURE protection)
             is_sensitive = _is_black_screen(data)
             
+            # If sensitive, try canvas screenshot as fallback
+            if is_sensitive and device_id:
+                canvas_data = _get_canvas_screenshot(device_id)
+                if canvas_data:
+                    try:
+                        img_data = base64.b64decode(canvas_data)
+                        canvas_img = Image.open(BytesIO(img_data))
+                        canvas_width, canvas_height = canvas_img.size
+                        return Screenshot(
+                            base64_data=canvas_data,
+                            width=canvas_width,
+                            height=canvas_height,
+                            is_sensitive=False,
+                        )
+                    except Exception:
+                        pass  # Fall through to return sensitive screenshot
+            
             buffered = BytesIO()
             img.save(buffered, format="PNG")
             base64_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -79,6 +113,25 @@ def capture_screenshot(
             continue
 
     return _fallback_screenshot()
+
+
+# Canvas screenshot cache (for FLAG_SECURE bypass)
+_canvas_screenshots: dict[str, str] = {}
+
+
+def set_canvas_screenshot(device_id: str, base64_data: str) -> None:
+    """Store a canvas screenshot from frontend."""
+    _canvas_screenshots[device_id] = base64_data
+
+
+def _get_canvas_screenshot(device_id: str) -> str | None:
+    """Get cached canvas screenshot."""
+    return _canvas_screenshots.get(device_id)
+
+
+def clear_canvas_screenshot(device_id: str) -> None:
+    """Clear cached canvas screenshot."""
+    _canvas_screenshots.pop(device_id, None)
 
 
 def _try_capture(device_id: str | None, adb_path: str, timeout: int) -> bytes | None:
